@@ -14,7 +14,7 @@ CONF_LED_LOW_PIN = "led_low_pin"
 CONF_LED_MID_PIN = "led_mid_pin"
 CONF_LED_HIGH_PIN = "led_high_pin"
 
-CONFIG_SCHEMA = fan.FAN_SCHEMA.extend(
+CONFIG_SCHEMA = fan.fan_schema(VentaFan).extend(
     {
         cv.GenerateID(): cv.declare_id(VentaFan),
         cv.Required(CONF_SWITCH_FANSPEED_PIN): pins.gpio_output_pin_schema,
@@ -28,9 +28,8 @@ CONFIG_SCHEMA = fan.FAN_SCHEMA.extend(
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
+    var = await fan.new_fan(config)
     await cg.register_component(var, config)
-    await fan.register_fan(var, config)
 
     switch_fanspeed_pin = await cg.gpio_pin_expression(config[CONF_SWITCH_FANSPEED_PIN])
     cg.add(var.set_switch_fanspeed_pin(switch_fanspeed_pin))
