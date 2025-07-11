@@ -1,4 +1,5 @@
 #include "venta_fan.h"
+
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -93,23 +94,23 @@ void VentaFan::write_state_() {
 
   GPIOPin *led_pin;
   switch (this->speed) {
-  case 1:
-    led_pin = this->led_low_pin_;
-    break;
-  case 2:
-    led_pin = this->led_mid_pin_ != nullptr ? this->led_mid_pin_ : this->led_high_pin_;
-    break;
-  case 3:
-    led_pin = this->led_high_pin_;
-    break;
-  default:
-    status_set_error("Invalid speed setting");
-    return;
+    case 1:
+      led_pin = this->led_low_pin_;
+      break;
+    case 2:
+      led_pin = this->led_mid_pin_ != nullptr ? this->led_mid_pin_ : this->led_high_pin_;
+      break;
+    case 3:
+      led_pin = this->led_high_pin_;
+      break;
+    default:
+      status_set_error("Invalid speed setting");
+      return;
   }
 
   // Toggle fanspeed until we reach desired speed
   int tries = 0;
-  while (led_pin->digital_read()) { // pin readings are inverted!
+  while (led_pin->digital_read()) {  // pin readings are inverted!
     click_switch_(this->switch_fanspeed_pin_);
     tries++;
     if (is_internal_error_() || tries > SWITCH_MAX_TRIES) {
@@ -140,10 +141,8 @@ void VentaFan::click_switch_(GPIOPin *output) {
 
 bool VentaFan::is_internal_error_() {
   // LED states are inverted
-  return (!this->led_power_pin_->digital_read() &&
-          this->led_low_pin_->digital_read() && 
-          (this->led_mid_pin_ != nullptr && this->led_mid_pin_->digital_read()) &&
-          this->led_high_pin_->digital_read());
+  return (!this->led_power_pin_->digital_read() && this->led_low_pin_->digital_read() &&
+          (this->led_mid_pin_ != nullptr && this->led_mid_pin_->digital_read()) && this->led_high_pin_->digital_read());
 }
 
 }  // namespace venta_fan
