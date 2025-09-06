@@ -1,0 +1,8 @@
+{
+    "python.analysis.extraPaths": [
+        "../esphome"
+    ],
+    "python.defaultInterpreterPath": "/usr/bin/python3",
+    "python.analysis.autoSearchPaths": true,
+    "python.analysis.diagnosticMode": "workspace"
+}
