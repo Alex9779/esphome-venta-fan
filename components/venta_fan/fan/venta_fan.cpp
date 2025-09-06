@@ -9,6 +9,8 @@ static const int SWITCH_DELAY = 50;
 static const int SWITCH_INTERVAL = 100;
 static const int SWITCH_MAX_TRIES = 10;
 
+bool should_update = false;
+
 static const char *TAG = "venta_fan.fan";
 
 void VentaFan::setup() {
@@ -27,13 +29,11 @@ fan::FanTraits VentaFan::get_traits() {
 }
 
 void VentaFan::update() {
-  bool updated = false;
-  bool error = false;
 
   bool cur_state = !this->led_power_pin_->digital_read();
   if (this->state != cur_state) {
     this->state = cur_state;
-    updated = true;
+    should_update = true;
   }
 
   int cur_speed = 0;
@@ -52,11 +52,7 @@ void VentaFan::update() {
 
   if (this->speed != cur_speed) {
     this->speed = cur_speed;
-    updated = true;
-  }
-
-  if (updated) {
-    this->publish_state();
+    should_update = true;
   }
 
   if (this->error_status_sensor_ != nullptr) {
