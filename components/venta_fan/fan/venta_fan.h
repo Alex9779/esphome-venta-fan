@@ -5,14 +5,15 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/hal.h"
+#include "esphome/core/log.h"
 
 namespace esphome {
 namespace venta_fan {
 
-class VentaFan : public PollingComponent, public fan::Fan {
+class VentaFan : public Component, public fan::Fan {
  public:
   void setup() override;
-  void update() override;
+  void loop() override;
   void dump_config() override;
   void set_switch_fanspeed_pin(GPIOPin *switch_fanspeed_pin) {
     this->switch_fanspeed_pin_ = switch_fanspeed_pin;
@@ -42,6 +43,10 @@ class VentaFan : public PollingComponent, public fan::Fan {
   void click_switch_(GPIOPin *output);
   void write_state_();
   bool is_internal_error_();
+  void read_current_state_();
+  void on_state_change_();
+  
+  static void IRAM_ATTR gpio_intr(VentaFan *arg);
 
   GPIOPin *switch_fanspeed_pin_;
   GPIOPin *switch_power_pin_;
@@ -50,6 +55,7 @@ class VentaFan : public PollingComponent, public fan::Fan {
   GPIOPin *led_mid_pin_;
   GPIOPin *led_high_pin_;
   binary_sensor::BinarySensor *error_status_sensor_;
+  volatile bool state_changed_ = false;
 };
 
 class VentaFanBinaryComponent : public Component {
