@@ -10,7 +10,7 @@
 namespace esphome {
 namespace venta_fan {
 
-class VentaFan : public Component, public fan::Fan {
+class VentaFan : public fan::Fan, public Component {
  public:
   void setup() override;
   void loop() override;
@@ -56,6 +56,7 @@ class VentaFan : public Component, public fan::Fan {
   GPIOPin *led_high_pin_;
   binary_sensor::BinarySensor *error_status_sensor_;
   volatile bool state_changed_ = false;
+  bool error_{false};
 };
 
 class VentaFanBinaryComponent : public Component {

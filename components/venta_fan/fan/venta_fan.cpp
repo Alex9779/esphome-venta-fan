@@ -82,7 +82,7 @@ void VentaFan::read_current_state_() {
   }
 
   int cur_speed = 0;
-  bool error = false;
+  bool current_error = false;  // Local variable for current pin reading
   if (!this->led_low_pin_->digital_read()) {
     cur_speed = 1;
   } else if (this->led_mid_pin_ != nullptr && !this->led_mid_pin_->digital_read()) {
@@ -92,8 +92,15 @@ void VentaFan::read_current_state_() {
   } else {
     if (cur_state) {
       // On but no speed lit means error must be lit
-      error = true;
+      current_error = true;
+      this->error_ = true;  // Set persistent error
     }
+  }
+
+  // If we're not detecting an error anymore, clear the persistent error
+  if (!current_error && this->error_) {
+    this->error_ = false;
+    status_clear_error();
   }
 
   if (this->speed != cur_speed) {
@@ -102,8 +109,8 @@ void VentaFan::read_current_state_() {
   }
 
   if (this->error_status_sensor_ != nullptr) {
-    if (this->error_status_sensor_->state != error || !this->error_status_sensor_->has_state()) {
-      this->error_status_sensor_->publish_state(error);
+    if (this->error_status_sensor_->state != this->error_ || !this->error_status_sensor_->has_state()) {
+      this->error_status_sensor_->publish_state(this->error_);
     }
   }
 }
@@ -137,6 +144,12 @@ void VentaFan::control(const fan::FanCall &call) {
 }
 
 void VentaFan::write_state_() {
+  // Don't allow state changes if we're in an error state
+  if (this->error_) {
+    ESP_LOGW(TAG, "Cannot change state while in error state. Wait for hardware state change.");
+    return;
+  }
+
   if (!this->state || this->speed == 0) {
     // Turn power off
     if (!this->led_power_pin_->digital_read()) {
@@ -172,12 +185,16 @@ void VentaFan::write_state_() {
     click_switch_(this->switch_fanspeed_pin_);
     tries++;
     if (is_internal_error_() || tries > SWITCH_MAX_TRIES) {
+      this->error_ = true;  // Set persistent error for hardware issues
       status_set_error("Internal error or too many tries to reach target speed setting");
       return;
     }
   }
 
-  status_clear_error();
+  // Only clear error if we're not in error state
+  if (!this->error_) {
+    status_clear_error();
+  }
 }
 
 void VentaFan::dump_config() {
