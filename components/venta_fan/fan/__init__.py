@@ -24,7 +24,7 @@ CONFIG_SCHEMA = fan.fan_schema(VentaFan).extend(
         cv.Optional(CONF_LED_MID_PIN): pins.gpio_input_pin_schema,
         cv.Required(CONF_LED_HIGH_PIN): pins.gpio_input_pin_schema
     }
-).extend(cv.polling_component_schema("1s"))
+)
 
 
 async def to_code(config):

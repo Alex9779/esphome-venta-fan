@@ -1,5 +1,12 @@
 #include "venta_fan.h"
-#include "esphome/core/log.h"
+
+#ifdef USE_ESP32
+#include "driver/gpio.h"
+#include "hal/gpio_hal.h"
+#endif
+#ifdef USE_ESP8266
+#include <Arduino.h>
+#endif
 
 namespace esphome {
 namespace venta_fan {
@@ -19,23 +26,63 @@ void VentaFan::setup() {
     this->led_mid_pin_->setup();
   }
   this->led_high_pin_->setup();
+
+  // Set up interrupts on LED pins to detect state changes
+#ifdef USE_ESP32
+  // Cast to InternalGPIOPin to access the pin number
+  InternalGPIOPin *power_pin = (InternalGPIOPin *) this->led_power_pin_;
+  InternalGPIOPin *low_pin = (InternalGPIOPin *) this->led_low_pin_;
+  InternalGPIOPin *high_pin = (InternalGPIOPin *) this->led_high_pin_;
+  // Install ISR service first
+  gpio_install_isr_service(0);
+  
+  gpio_set_intr_type((gpio_num_t) power_pin->get_pin(), GPIO_INTR_ANYEDGE);
+  gpio_set_intr_type((gpio_num_t) low_pin->get_pin(), GPIO_INTR_ANYEDGE);
+  gpio_set_intr_type((gpio_num_t) high_pin->get_pin(), GPIO_INTR_ANYEDGE);
+  
+  gpio_isr_handler_add((gpio_num_t) power_pin->get_pin(), (gpio_isr_t) &VentaFan::gpio_intr, this);
+  gpio_isr_handler_add((gpio_num_t) low_pin->get_pin(), (gpio_isr_t) &VentaFan::gpio_intr, this);
+  gpio_isr_handler_add((gpio_num_t) high_pin->get_pin(), (gpio_isr_t) &VentaFan::gpio_intr, this);
+  
+  if (this->led_mid_pin_ != nullptr) {
+    InternalGPIOPin *mid_pin = (InternalGPIOPin *) this->led_mid_pin_;
+    gpio_set_intr_type((gpio_num_t) mid_pin->get_pin(), GPIO_INTR_ANYEDGE);
+    gpio_isr_handler_add((gpio_num_t) mid_pin->get_pin(), (gpio_isr_t) &VentaFan::gpio_intr, this);
+  }
+#endif
+
+#ifdef USE_ESP8266
+  // Cast to InternalGPIOPin to access the pin number
+  InternalGPIOPin *power_pin = (InternalGPIOPin *) this->led_power_pin_;
+  InternalGPIOPin *low_pin = (InternalGPIOPin *) this->led_low_pin_;
+  InternalGPIOPin *high_pin = (InternalGPIOPin *) this->led_high_pin_;
+  
+  attachInterruptArg(digitalPinToInterrupt(power_pin->get_pin()), (void (*)()) &VentaFan::gpio_intr, this, CHANGE);
+  attachInterruptArg(digitalPinToInterrupt(low_pin->get_pin()), (void (*)()) &VentaFan::gpio_intr, this, CHANGE);
+  attachInterruptArg(digitalPinToInterrupt(high_pin->get_pin()), (void (*)()) &VentaFan::gpio_intr, this, CHANGE);
+  if (this->led_mid_pin_ != nullptr) {
+    InternalGPIOPin *mid_pin = (InternalGPIOPin *) this->led_mid_pin_;
+    attachInterruptArg(digitalPinToInterrupt(mid_pin->get_pin()), (void (*)()) &VentaFan::gpio_intr, this, CHANGE);
+  }
+#endif
+
+  // Read initial state
+  this->read_current_state_();
 }
 
 fan::FanTraits VentaFan::get_traits() {
   return fan::FanTraits(false, true, false, this->led_mid_pin_ != nullptr ? 3 : 2);
 }
 
-void VentaFan::update() {
-  bool updated = false;
-  bool error = false;
-
+void VentaFan::read_current_state_() {
   bool cur_state = !this->led_power_pin_->digital_read();
   if (this->state != cur_state) {
     this->state = cur_state;
-    updated = true;
+    this->publish_state();
   }
 
   int cur_speed = 0;
+  bool current_error = false;  // Local variable for current pin reading
   if (!this->led_low_pin_->digital_read()) {
     cur_speed = 1;
   } else if (this->led_mid_pin_ != nullptr && !this->led_mid_pin_->digital_read()) {
@@ -45,23 +92,42 @@ void VentaFan::update() {
   } else {
     if (cur_state) {
       // On but no speed lit means error must be lit
-      error = true;
+      current_error = true;
+      this->error_ = true;  // Set persistent error
     }
+  }
+
+  // If we're not detecting an error anymore, clear the persistent error
+  if (!current_error && this->error_) {
+    this->error_ = false;
+    status_clear_error();
   }
 
   if (this->speed != cur_speed) {
     this->speed = cur_speed;
-    updated = true;
-  }
-
-  if (updated) {
     this->publish_state();
   }
 
   if (this->error_status_sensor_ != nullptr) {
-    if (this->error_status_sensor_->state != error || !this->error_status_sensor_->has_state()) {
-      this->error_status_sensor_->publish_state(error);
+    if (this->error_status_sensor_->state != this->error_ || !this->error_status_sensor_->has_state()) {
+      this->error_status_sensor_->publish_state(this->error_);
     }
+  }
+}
+
+void VentaFan::on_state_change_() {
+  // Schedule state reading in the main loop to avoid doing too much work in interrupt context
+  this->defer([this]() { this->read_current_state_(); });
+}
+
+void IRAM_ATTR VentaFan::gpio_intr(VentaFan *arg) {
+  arg->state_changed_ = true;
+}
+
+void VentaFan::loop() {
+  if (this->state_changed_) {
+    this->state_changed_ = false;
+    this->on_state_change_();
   }
 }
 
@@ -78,6 +144,12 @@ void VentaFan::control(const fan::FanCall &call) {
 }
 
 void VentaFan::write_state_() {
+  // Don't allow state changes if we're in an error state
+  if (this->error_) {
+    ESP_LOGW(TAG, "Cannot change state while in error state. Wait for hardware state change.");
+    return;
+  }
+
   if (!this->state || this->speed == 0) {
     // Turn power off
     if (!this->led_power_pin_->digital_read()) {
@@ -93,32 +165,36 @@ void VentaFan::write_state_() {
 
   GPIOPin *led_pin;
   switch (this->speed) {
-  case 1:
-    led_pin = this->led_low_pin_;
-    break;
-  case 2:
-    led_pin = this->led_mid_pin_ != nullptr ? this->led_mid_pin_ : this->led_high_pin_;
-    break;
-  case 3:
-    led_pin = this->led_high_pin_;
-    break;
-  default:
-    status_set_error("Invalid speed setting");
-    return;
+    case 1:
+      led_pin = this->led_low_pin_;
+      break;
+    case 2:
+      led_pin = this->led_mid_pin_ != nullptr ? this->led_mid_pin_ : this->led_high_pin_;
+      break;
+    case 3:
+      led_pin = this->led_high_pin_;
+      break;
+    default:
+      status_set_error("Invalid speed setting");
+      return;
   }
 
   // Toggle fanspeed until we reach desired speed
   int tries = 0;
-  while (led_pin->digital_read()) { // pin readings are inverted!
+  while (led_pin->digital_read()) {  // pin readings are inverted!
     click_switch_(this->switch_fanspeed_pin_);
     tries++;
     if (is_internal_error_() || tries > SWITCH_MAX_TRIES) {
+      this->error_ = true;  // Set persistent error for hardware issues
       status_set_error("Internal error or too many tries to reach target speed setting");
       return;
     }
   }
 
-  status_clear_error();
+  // Only clear error if we're not in error state
+  if (!this->error_) {
+    status_clear_error();
+  }
 }
 
 void VentaFan::dump_config() {
@@ -140,10 +216,8 @@ void VentaFan::click_switch_(GPIOPin *output) {
 
 bool VentaFan::is_internal_error_() {
   // LED states are inverted
-  return (!this->led_power_pin_->digital_read() &&
-          this->led_low_pin_->digital_read() && 
-          (this->led_mid_pin_ != nullptr && this->led_mid_pin_->digital_read()) &&
-          this->led_high_pin_->digital_read());
+  return (!this->led_power_pin_->digital_read() && this->led_low_pin_->digital_read() &&
+          (this->led_mid_pin_ != nullptr && this->led_mid_pin_->digital_read()) && this->led_high_pin_->digital_read());
 }
 
 }  // namespace venta_fan

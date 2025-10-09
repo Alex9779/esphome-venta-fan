@@ -20,7 +20,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(VentaFanBinarySensor),
         cv.GenerateID(CONF_VENTA_FAN_ID): cv.use_id(VentaFan),
-        cv.Optional(CONF_ERROR_STATUS): binary_sensor.binary_sensor_schema(
+        cv.Required(CONF_ERROR_STATUS): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_PROBLEM,
         ),
     }
@@ -32,6 +32,5 @@ async def to_code(config):
     bin_component = cg.new_Pvariable(config[CONF_ID], venta_fan)
     await cg.register_component(bin_component, config)
 
-    if error_status_sensor := config.get(CONF_ERROR_STATUS):
-      sensor = await binary_sensor.new_binary_sensor(error_status_sensor)
-      cg.add(venta_fan.set_error_status_sensor(sensor))
+    sensor = await binary_sensor.new_binary_sensor(config[CONF_ERROR_STATUS])
+    cg.add(venta_fan.set_error_status_sensor(sensor))
