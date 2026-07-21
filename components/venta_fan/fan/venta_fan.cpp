@@ -103,7 +103,7 @@ void VentaFan::write_state_() {
     led_pin = this->led_high_pin_;
     break;
   default:
-    status_set_error("Invalid speed setting");
+    status_set_error(LOG_STR("Invalid speed setting"));
     return;
   }
 
@@ -113,7 +113,7 @@ void VentaFan::write_state_() {
     click_switch_(this->switch_fanspeed_pin_);
     tries++;
     if (is_internal_error_() || tries > SWITCH_MAX_TRIES) {
-      status_set_error("Internal error or too many tries to reach target speed setting");
+      status_set_error(LOG_STR("Internal error or too many tries to reach target speed setting"));
       return;
     }
   }
